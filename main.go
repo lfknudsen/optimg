@@ -124,9 +124,11 @@ func convertToPNG(dir string, abs string, info *fs.FileInfo) error {
 }
 
 func printHelp() {
-	fmt.Println("Usage: optimg [Options]\nOptions:")
+	fmt.Println("Usage: optimg [Options]\n\nOptions:")
 	flag.PrintDefaults()
 }
+
+var help = flag.Bool("h", false, "Print this help message and exit.")
 
 var level = flag.Int("o", 2, "OptiPNG optimisation level (0-7)")
 var debug = flag.Bool("d", false, "Verbose debug mode")
@@ -137,6 +139,11 @@ var maxDimension = flag.Int("max", 6000, "If an image has a width/height above t
 
 func main() {
 	flag.Parse()
+	if *help {
+		printHelp()
+		os.Exit(0)
+	}
+
 	if *level < 0 || *level > 7 {
 		_, _ = fmt.Fprintf(os.Stderr, "Optimisation level must be between 0-7 inclusive.\n")
 		printHelp()
