@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/hymkor/trash-go"
 )
 
 var rxNonPng = regexp.MustCompile(`(?i).*\.(?:jpg|jpeg)`)
@@ -54,6 +56,8 @@ func handle(dir string, wg *sync.WaitGroup) {
 				err = cmd.Run()
 				if err != nil {
 					log.Println(err)
+				} else {
+					_ = trash.Throw(filepath.Join(dir, info.Name()))
 				}
 			}
 
