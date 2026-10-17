@@ -6,6 +6,7 @@ import (
 	"image"
 	_ "image/jpeg"
 	_ "image/png"
+	"io/fs"
 	"log"
 	"os"
 	"os/exec"
@@ -21,8 +22,8 @@ import (
 var rxNonPng = regexp.MustCompile(`(?i).*\.(?:jpg|jpeg)`)
 var rxPNG = regexp.MustCompile(`(?i).*\.png`)
 
-func debug(msg ...string) {
-	if *DEBUG {
+func DEBUG(msg ...string) {
+	if *debug {
 		fmt.Println(msg)
 	}
 }
@@ -46,51 +47,14 @@ func handle(dir string, wg *sync.WaitGroup) {
 			}
 			// Start by converting to .png
 			if rxNonPng.MatchString(info.Name()) {
-				convert := fmt.Sprintf("/convert=%s",
-					strings.TrimSuffix(abs, filepath.Ext(abs))+".png")
-				cmd := exec.Command("i_view64", abs, convert)
-				cmd.Dir = dir
-				cmd.Stdout = os.Stdout
-				cmd.Stderr = os.Stderr
-				debug("Conversion command:", cmd.String())
-				err = cmd.Run()
-				if err != nil {
-					log.Println(err)
-				} else {
-					_ = trash.Throw(filepath.Join(dir, info.Name()))
-				}
+				err = convertToPNG(dir, abs, &info)
 			}
 
 			// Resize the image if it's 6k or larger
-			f, err := os.OpenFile(abs, os.O_RDONLY, 0666)
+			err = resize(dir, abs, info)
 			if err != nil {
-				fmt.Println("Error opening image file for resizing:", err)
+				_, _ = fmt.Fprintln(os.Stderr, "Error resizing file:", err)
 				continue
-			}
-			debug("Decoding image file:", abs)
-			img, _, err := image.DecodeConfig(f)
-			if err != nil {
-				fmt.Println("Error decoding image info header:", err)
-				_ = f.Close()
-				continue
-			}
-			_ = f.Close()
-			if img.Width > 6000 && img.Height > 4000 || img.Height > 6000 && img.Width > 4000 {
-				abs, err := filepath.Abs(filepath.Join(dir, info.Name()))
-				if err != nil {
-					fmt.Println(err)
-				} else {
-					resizeArg := fmt.Sprintf("resize=(%d,%d)", img.Width/2, img.Height/2)
-					cmd := exec.Command("i_view64", "/file="+abs, "/makecopy", resizeArg, "/resample", "/aspectratio")
-					cmd.Dir = dir
-					cmd.Stdout = os.Stdout
-					cmd.Stderr = os.Stderr
-					debug("Resizing command:", cmd.String())
-					err = cmd.Run()
-					if err != nil {
-						log.Println(err)
-					}
-				}
 			}
 
 			// Optimise the image
@@ -98,7 +62,7 @@ func handle(dir string, wg *sync.WaitGroup) {
 			cmd.Dir = dir
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
-			debug("OptiPNG command:", cmd.String())
+			DEBUG("OptiPNG command:", cmd.String())
 			err = cmd.Run()
 			if err != nil {
 				log.Println(err)
@@ -113,16 +77,75 @@ func handle(dir string, wg *sync.WaitGroup) {
 	}
 }
 
+func resize(dir string, abs string, info fs.FileInfo) error {
+	f, err := os.OpenFile(abs, os.O_RDONLY, 0666)
+	if err != nil {
+		return err
+	}
+	DEBUG("Decoding image file:", abs)
+	img, _, err := image.DecodeConfig(f)
+	_ = f.Close()
+	if err != nil {
+		return err
+	}
+	if img.Width > *maxDimension && img.Height > *minDimension ||
+		img.Height > *maxDimension && img.Width > *minDimension {
+		abs, err := filepath.Abs(filepath.Join(dir, info.Name()))
+		if err != nil {
+			return err
+		}
+		resizeArg := fmt.Sprintf("resize=(%d,%d)", img.Width/2, img.Height/2)
+		cmd := exec.Command("i_view64", "/file="+abs, "/makecopy", resizeArg, "/resample", "/aspectratio")
+		cmd.Dir = dir
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		DEBUG("Resizing command:", cmd.String())
+		err = cmd.Run()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func convertToPNG(dir string, abs string, info *fs.FileInfo) error {
+	convert := fmt.Sprintf("/convert=%s",
+		strings.TrimSuffix(abs, filepath.Ext(abs))+".png")
+	cmd := exec.Command("i_view64", abs, convert)
+	cmd.Dir = dir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	DEBUG("Conversion command:", cmd.String())
+	err := cmd.Run()
+	if err != nil {
+		return err
+	}
+	return trash.Throw(filepath.Join(dir, (*info).Name()))
+}
+
 func printHelp() {
+	fmt.Println("Usage: optimg [Options]\nOptions:")
 	flag.PrintDefaults()
 }
 
 var level = flag.Int("o", 2, "OptiPNG optimisation level (0-7)")
-var DEBUG = flag.Bool("d", false, "Debug mode")
+var debug = flag.Bool("d", false, "Verbose debug mode")
+
+var minDimension = flag.Int("min", 4000, "If an image has width/height below this number, it will not be resized.")
+
+var maxDimension = flag.Int("max", 6000, "If an image has a width/height above this number, it will be resized (unless the other dimension is below min).")
 
 func main() {
 	flag.Parse()
 	if *level < 0 || *level > 7 {
+		_, _ = fmt.Fprintf(os.Stderr, "Optimisation level must be between 0-7 inclusive.\n")
+		printHelp()
+		os.Exit(1)
+	}
+	if *minDimension < 0 || *maxDimension < 0 || *minDimension >= *maxDimension {
+		_, _ = fmt.Fprintf(os.Stderr,
+			"Minimum and maximum dimension breakpoints must be positive,\n"+
+				" and min must be smaller than max.\n")
 		printHelp()
 		os.Exit(1)
 	}
