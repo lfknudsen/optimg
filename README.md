@@ -40,4 +40,12 @@ Options:
 -max <integer>              An image with a dimension above this number of pixels
                             will be resized (unless its other dimension is below
                             the value of -min). Default value: 6000.
+
+Debugging options:
+-d                          Print more information to standard output.
+
+-new-ini                    Regenerate the programme's .ini file used for
+                            specifying how IrfanView resampling and conversion
+                            should happen. It should not be necessary to ever
+                            provide this argument.
 ```
