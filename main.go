@@ -28,6 +28,44 @@ func DEBUG(msg ...string) {
 	}
 }
 
+const iniFile = "[PNG]\n" +
+	"SavePNGTransp=0\n" +
+	"SavePNGAlpha=0\n" +
+	"PngWndColor=1\n" +
+	"PngOptim=0\n" +
+	"PngOptimLevel=2\n" +
+	"CompressionLevel=7\n" +
+	"[Resize]\n" +
+	"ResampleFilter=5\n" +
+	"FastResampleDown=0\n" +
+	"ResampleGamma=0\n" +
+	"ResizeAspectRatio=1\n" +
+	"UseResample=1\n" +
+	"Sharpen=0\n" +
+	"Mode=1\n" +
+	"MegaPix=4.00\n" +
+	"ResizeAutoDPI=0\n" +
+	"DPI=300\n" +
+	"Unit=0"
+
+func generateIniFile() {
+	err := os.WriteFile(irfanIniFile, []byte(iniFile), 0644)
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+func ExecutableDirectory() string {
+	e, err := os.Executable()
+	if err != nil {
+		log.Fatal(err)
+	}
+	return filepath.Dir(e)
+}
+
+var executableDirectory = ExecutableDirectory()
+var irfanIniFile = filepath.Join(executableDirectory, "i_view64.ini")
+
 func handle(dir string, wg *sync.WaitGroup) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -51,7 +89,7 @@ func handle(dir string, wg *sync.WaitGroup) {
 			}
 
 			// Resize the image if it's 6k or larger
-			err = resize(dir, abs, info)
+			err = resize(dir, abs)
 			if err != nil {
 				_, _ = fmt.Fprintln(os.Stderr, "Error resizing file:", err)
 				continue
@@ -77,7 +115,7 @@ func handle(dir string, wg *sync.WaitGroup) {
 	}
 }
 
-func resize(dir string, abs string, info fs.FileInfo) error {
+func resize(dir string, abs string) error {
 	f, err := os.OpenFile(abs, os.O_RDONLY, 0666)
 	if err != nil {
 		return err
@@ -90,12 +128,9 @@ func resize(dir string, abs string, info fs.FileInfo) error {
 	}
 	if img.Width > *maxDimension && img.Height > *minDimension ||
 		img.Height > *maxDimension && img.Width > *minDimension {
-		abs, err := filepath.Abs(filepath.Join(dir, info.Name()))
-		if err != nil {
-			return err
-		}
-		resizeArg := fmt.Sprintf("resize=(%d,%d)", img.Width/2, img.Height/2)
-		cmd := exec.Command("i_view64", "/file="+abs, "/makecopy", resizeArg, "/resample", "/aspectratio")
+		cmd := exec.Command("i_view64", "/file="+abs, "/resize=(50p,50p)",
+			"/resample", "/aspectratio", "/cmdexit", "/ini="+executableDirectory,
+			"/convert="+abs)
 		cmd.Dir = dir
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -129,19 +164,25 @@ func printHelp() {
 }
 
 var help = flag.Bool("h", false, "Print this help message and exit.")
-
 var level = flag.Int("o", 2, "OptiPNG optimisation level (0-7)")
 var debug = flag.Bool("d", false, "Verbose debug mode")
-
 var minDimension = flag.Int("min", 4000, "If an image has width/height below this number, it will not be resized.")
-
 var maxDimension = flag.Int("max", 6000, "If an image has a width/height above this number, it will be resized (unless the other dimension is below min).")
+var regenIniFile = flag.Bool("new-ini", false, "Generate new ini file.")
 
 func main() {
 	flag.Parse()
 	if *help {
 		printHelp()
 		os.Exit(0)
+	}
+	if *regenIniFile {
+		generateIniFile()
+	} else {
+		_, err := os.Stat(irfanIniFile)
+		if err != nil {
+			generateIniFile()
+		}
 	}
 
 	if *level < 0 || *level > 7 {
