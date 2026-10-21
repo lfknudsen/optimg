@@ -6,7 +6,6 @@ import (
 	"image"
 	_ "image/jpeg"
 	_ "image/png"
-	"io/fs"
 	"log"
 	"os"
 	"os/exec"
@@ -85,7 +84,7 @@ func handle(dir string, wg *sync.WaitGroup) {
 			}
 			// Start by converting to .png
 			if rxNonPng.MatchString(info.Name()) {
-				err = convertToPNG(dir, abs, &info)
+				abs, err = convertToPNG(dir, abs)
 			}
 
 			// Resize the image if it's 6k or larger
@@ -143,9 +142,10 @@ func resize(dir string, abs string) error {
 	return nil
 }
 
-func convertToPNG(dir string, abs string, info *fs.FileInfo) error {
-	convert := fmt.Sprintf("/convert=%s",
-		strings.TrimSuffix(abs, filepath.Ext(abs))+".png")
+func convertToPNG(dir string, abs string) (string, error) {
+	newName := strings.TrimSuffix(abs, filepath.Ext(abs)) + ".png"
+	convert := fmt.Sprintf("/convert=%s", newName)
+
 	cmd := exec.Command("i_view64", abs, convert)
 	cmd.Dir = dir
 	cmd.Stdout = os.Stdout
@@ -153,9 +153,9 @@ func convertToPNG(dir string, abs string, info *fs.FileInfo) error {
 	DEBUG("Conversion command:", cmd.String())
 	err := cmd.Run()
 	if err != nil {
-		return err
+		return newName, err
 	}
-	return trash.Throw(filepath.Join(dir, (*info).Name()))
+	return newName, trash.Throw(abs)
 }
 
 func printHelp() {
