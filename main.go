@@ -20,6 +20,7 @@ import (
 
 var rxNonPng = regexp.MustCompile(`(?i).*\.(?:jpg|jpeg)`)
 var rxPNG = regexp.MustCompile(`(?i).*\.png`)
+var rxImage = regexp.MustCompile(`(?i).*\.(png|jpg|jpeg)`)
 
 func DEBUG(msg ...string) {
 	if *debug {
@@ -65,53 +66,75 @@ func ExecutableDirectory() string {
 var executableDirectory = ExecutableDirectory()
 var irfanIniFile = filepath.Join(executableDirectory, "i_view64.ini")
 
-func handle(dir string, wg *sync.WaitGroup) {
+func collectFiles(dir string) []string {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		log.Panic("Error reading directory:", err)
 	}
+	files := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		info, err := entry.Info()
 		if err != nil {
 			fmt.Println("Error opening file info:", err)
 			continue
 		}
-		if info.Mode().IsRegular() {
+		if info.Mode().IsRegular() && rxImage.MatchString(info.Name()) {
 			abs, err := filepath.Abs(filepath.Join(dir, info.Name()))
 			if err != nil {
 				fmt.Println("Error getting absolute filepath:", err)
 				continue
 			}
+			files = append(files, abs)
+			continue
+		}
+		if info.IsDir() {
+			files = append(files, collectFiles(filepath.Join(dir, info.Name()))...)
+		}
+	}
+	return files
+}
+
+func handle(dir string) {
+	files := collectFiles(dir)
+	var err error
+	total := fmt.Sprint(len(files))
+	wg := sync.WaitGroup{}
+	for i, file := range files {
+		wg.Go(func() {
+			current := fmt.Sprint(i)
+			prefix := strings.Repeat(" ", len(total)-len(current))
+			fmt.Printf("%s%s/%s: Processing %s\n", prefix, current, total, file)
+
 			// Start by converting to .png
-			if rxNonPng.MatchString(info.Name()) {
-				abs, err = convertToPNG(dir, abs)
+			if rxNonPng.MatchString(file) {
+				file, err = convertToPNG(dir, file)
+			}
+			if err != nil {
+				log.Panic("Error converting file:", err)
 			}
 
 			// Resize the image if it's 6k or larger
-			err = resize(dir, abs)
+			err = resize(dir, file)
 			if err != nil {
-				_, _ = fmt.Fprintln(os.Stderr, "Error resizing file:", err)
-				continue
+				log.Panic("Error resizing file:", err)
 			}
 
 			// Optimise the image
-			cmd := exec.Command("optipng", "-preserve", "-o", strconv.Itoa(*level), abs)
+			cmd := exec.Command("optipng", "-preserve", "-o", strconv.Itoa(*level), file)
 			cmd.Dir = dir
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
-			DEBUG("OptiPNG command:", cmd.String())
-			err = cmd.Run()
+			err = cmd.Start()
 			if err != nil {
-				log.Println(err)
+				log.Panic("Error optimising file:", err)
 			}
-		} else if info.Mode().IsDir() {
-			if wg != nil {
-				wg.Go(func() { handle(filepath.Join(dir, info.Name()), wg) })
-			} else {
-				handle(filepath.Join(dir, info.Name()), wg)
+			err = cmd.Wait()
+			if err != nil {
+				log.Panic("Error optimising file:", err)
 			}
-		}
+		})
 	}
+	wg.Wait()
 }
 
 func resize(dir string, abs string) error {
@@ -127,7 +150,13 @@ func resize(dir string, abs string) error {
 	}
 	if img.Width > *maxDimension && img.Height > *minDimension ||
 		img.Height > *maxDimension && img.Width > *minDimension {
-		cmd := exec.Command("i_view64", "/file="+abs, "/resize=(50p,50p)",
+		newPercentage := 50
+		if img.Width/2 > *maxDimension && img.Height/2 > *minDimension ||
+			img.Height/2 > *maxDimension && img.Width/2 > *minDimension {
+			newPercentage /= 2
+		}
+		cmd := exec.Command("i_view64", "/file="+abs,
+			fmt.Sprintf("/resize=(%dp,%dp)", newPercentage, newPercentage),
 			"/resample", "/aspectratio", "/cmdexit", "/ini="+executableDirectory,
 			"/convert="+abs)
 		cmd.Dir = dir
@@ -198,8 +227,5 @@ func main() {
 		os.Exit(1)
 	}
 
-	handle(".", nil)
-	//wg := new(sync.WaitGroup)
-	//wg.Go(func() { handle(".", level, wg) })
-	//wg.Wait()
+	handle(".")
 }
