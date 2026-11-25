@@ -173,7 +173,7 @@ func resize(dir string, abs string) error {
 
 func convertToPNG(dir string, abs string) (string, error) {
 	newName := strings.TrimSuffix(abs, filepath.Ext(abs)) + ".png"
-	convert := fmt.Sprintf("/convert=%s", newName)
+	convert := fmt.Sprintf("/convert=$N.png")
 
 	cmd := exec.Command("i_view64", abs, convert)
 	cmd.Dir = dir
