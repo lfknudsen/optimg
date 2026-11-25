@@ -158,7 +158,7 @@ func resize(dir string, abs string) error {
 		cmd := exec.Command("i_view64", "/file="+abs,
 			fmt.Sprintf("/resize=(%dp,%dp)", newPercentage, newPercentage),
 			"/resample", "/aspectratio", "/cmdexit", "/ini="+executableDirectory,
-			"/convert="+abs)
+			"/convert=$N.png")
 		cmd.Dir = dir
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
