@@ -32,8 +32,6 @@ const iniFile = "[PNG]\n" +
 	"SavePNGTransp=0\n" +
 	"SavePNGAlpha=0\n" +
 	"PngWndColor=1\n" +
-	"PngOptim=0\n" +
-	"PngOptimLevel=2\n" +
 	"CompressionLevel=7\n" +
 	"[Resize]\n" +
 	"ResampleFilter=5\n" +
@@ -94,47 +92,59 @@ func collectFiles(dir string) []string {
 	return files
 }
 
+func handleFile(file string, dir string, verbose bool) {
+	var err error
+	// Start by converting to .png
+	if rxNonPng.MatchString(file) {
+		file, err = convertToPNG(dir, file)
+	}
+	if err != nil {
+		log.Panic("Error converting file:", err)
+	}
+
+	// Resize the image if it's 6k or larger
+	err = resize(dir, file)
+	if err != nil {
+		log.Panic("Error resizing file:", err)
+	}
+
+	// Optimise the image
+	cmd := exec.Command("optipng", "-preserve", "-o", strconv.Itoa(*level), file)
+	cmd.Dir = dir
+	if verbose {
+		cmd.Stdout = os.Stdout
+	} else {
+		cmd.Stdout = nil
+	}
+	cmd.Stderr = os.Stderr
+	err = cmd.Start()
+	if err != nil {
+		log.Panic("Error optimising file:", err)
+	}
+	err = cmd.Wait()
+	if err != nil {
+		log.Panic("Error optimising file:", err)
+	}
+}
+
 func handle(dir string) {
 	files := collectFiles(dir)
-	var err error
-	total := fmt.Sprint(len(files))
-	wg := sync.WaitGroup{}
-	for i, file := range files {
-		wg.Go(func() {
+	if *sequential {
+		total := fmt.Sprint(len(files))
+		for i, file := range files {
 			current := fmt.Sprint(i)
 			prefix := strings.Repeat(" ", len(total)-len(current))
 			fmt.Printf("%s%s/%s: Processing %s\n", prefix, current, total, file)
-
-			// Start by converting to .png
-			if rxNonPng.MatchString(file) {
-				file, err = convertToPNG(dir, file)
-			}
-			if err != nil {
-				log.Panic("Error converting file:", err)
-			}
-
-			// Resize the image if it's 6k or larger
-			err = resize(dir, file)
-			if err != nil {
-				log.Panic("Error resizing file:", err)
-			}
-
-			// Optimise the image
-			cmd := exec.Command("optipng", "-preserve", "-o", strconv.Itoa(*level), file)
-			cmd.Dir = dir
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
-			err = cmd.Start()
-			if err != nil {
-				log.Panic("Error optimising file:", err)
-			}
-			err = cmd.Wait()
-			if err != nil {
-				log.Panic("Error optimising file:", err)
-			}
-		})
+			handleFile(file, dir, true)
+		}
+	} else {
+		fmt.Printf("Processing %d files...", len(files))
+		wg := sync.WaitGroup{}
+		for _, file := range files {
+			wg.Go(func() { handleFile(file, dir, false) })
+		}
+		wg.Wait()
 	}
-	wg.Wait()
 }
 
 func resize(dir string, abs string) error {
@@ -198,6 +208,7 @@ var debug = flag.Bool("d", false, "Verbose debug mode")
 var minDimension = flag.Int("min", 4000, "If an image has width/height below this number, it will not be resized.")
 var maxDimension = flag.Int("max", 6000, "If an image has a width/height above this number, it will be resized (unless the other dimension is below min).")
 var regenIniFile = flag.Bool("new-ini", false, "Generate new ini file.")
+var sequential = flag.Bool("s", false, "Execute the optimisation for each file sequentially.")
 
 func main() {
 	flag.Parse()
